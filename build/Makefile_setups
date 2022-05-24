@@ -1043,3 +1043,24 @@ ifeq ($(SETUP), radiativebox)
     IND_TIMESTEPS=no
     PERIODIC=yes
 endif
+
+ifeq ($(SETUP), r2sphere)
+#   barotropic r^-2 sphere 
+    ANALYSIS=analysis_sinkmass.f90
+    SETUPFILE=setup_r2sphere.f90
+    #SRCTURB= forcing.F90
+    #ANALYSIS=analysis_sphere.f90
+    ISOTHERMAL=yes
+    GRAVITY=yes
+    KNOWN_SETUP=yes
+endif
+
+ifeq ($(SETUP), isor2sphere)
+#   isothermal r^-2 sphere 
+    ANALYSIS=analysis_sinkmass.f90
+    SETUPFILE=setup_isor2sphere.f90
+    #ANALYSIS=analysis_sphere.f90
+    ISOTHERMAL=yes
+    GRAVITY=yes
+    KNOWN_SETUP=yes
+endif
