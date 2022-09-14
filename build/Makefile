@@ -90,6 +90,12 @@ LIBTOOL=libtool
 
 include Makefile_setups
 
+ifeq ($(SYSTEM), cipcluster)
+    include Makefile_defaults_gfortran
+    QSYS = slurm
+    QPROJECT='p01'
+endif 
+
 ifndef SETUPFILE
     SETUPFILE= setup_unifdis.f90
 endif
