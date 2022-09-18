@@ -71,9 +71,9 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  character(len=20), intent(in)    :: fileprefix
  integer                      :: i,ierr
  real                         :: r2,totmass,epotgrav,t_ff,psep
- character(len=20), parameter :: filevx = 'cube_v1.dat'
- character(len=20), parameter :: filevy = 'cube_v2.dat'
- character(len=20), parameter :: filevz = 'cube_v3.dat'
+ character(len=20), parameter :: filevx = 'vel_v1.dat'
+ character(len=20), parameter :: filevy = 'vel_v2.dat'
+ character(len=20), parameter :: filevz = 'vel_v3.dat'
  character(len=16)            :: lattice
  character(len=120)           :: filex,filey,filez,filein,fileset
  logical                      :: inexists,setexists
