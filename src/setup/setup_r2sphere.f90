@@ -148,7 +148,7 @@ endif
  hfact         = hfact_default
  t_ff          = sqrt(3.*pi/(32.*rhozero))  ! free-fall time (the characteristic timescale)
  epotgrav      = 3./5.*totmass_sphere**2/r_sphere      ! Gravitational potential energy
- lattice       = 'random'
+ lattice       = 'hcp'
  angvel_code = angvel*utime
  vol_box     = dxbound*dybound*dzbound
  !
