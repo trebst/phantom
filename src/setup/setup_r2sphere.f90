@@ -17,7 +17,6 @@ module setup
 ! :Runtime parameters:
 !   - angvel           : *angular velocity in rad/s*
 !   - dist_unit        : *distance unit (e.g. au)*
-!   - dusttogas        : *dust-to-gas ratio*
 !   - h_acc            : *accretion radius (code units)*
 !   - h_soft_sinksink  : *sink-sink softening radius (code units)*
 !   - icreate_sinks    : *1: create sinks.  0: do not create sinks*
@@ -80,6 +79,11 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  use kernel,        only:hfact_default
  use mpidomain,     only:i_belong
  use ptmass,        only:icreate_sinks,r_crit,h_acc,h_soft_sinksink
+ ! specifically needed for turbulent setup
+ use datafiles,     only:find_phantom_datafile
+ use setvfield,     only:normalise_vfield
+ use velfield,      only:set_velfield_from_cubes
+
  integer,           intent(in)    :: id
  integer,           intent(inout) :: npart
  integer,           intent(out)   :: npartoftype(:)
@@ -97,7 +101,10 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  real                         :: rxy2,rxyz2,phi,dphi,central_density,edge_density
  logical                      :: inexists,setexists
  logical                      :: make_sinks = .true.
- character(len=120)           :: filename,filein,fileset
+ character(len=20), parameter :: filevx = 'vel_v1.dat'
+ character(len=20), parameter :: filevy = 'vel_v2.dat'
+ character(len=20), parameter :: filevz = 'vel_v3.dat'
+ character(len=120)           :: filename,filein,fileset,filex,filey,filez
  character(len=40)            :: fmt
  character(len=16)            :: lattice
  procedure(rho_func), pointer :: density_func ! pointer to created function
@@ -188,16 +195,31 @@ endif
     call set_particle_type(i,igas)
  enddo
  !
- ! reset to centre of mass
- !
- call reset_centreofmass(npart,xyzh,vxyzu)
- !
- ! velocity field corresponding to uniform rotation
+ ! velocity field corresponding to uniform rotation or turbulent setup from files
  !
  do i=1,npart
    if (turb) then
-
+      !!--Set velocities (from pre-made velocity cubes)
+      !write(*,"(1x,a)") 'Setting up velocity field on the particles...'
+      !vxyzu(:,:) = 0.
+      !filex = find_phantom_datafile(filevx,'velfield')
+      !filey = find_phantom_datafile(filevy,'velfield')
+      !filez = find_phantom_datafile(filevz,'velfield')
+      !
+      !call set_velfield_from_cubes(xyzh,vxyzu,npartoftype(igas),filex,filey,filez,1.,r_sphere,.false.,ierr)
+      !if (ierr /= 0) call fatal('setup','error setting up velocity field')
+      !
+      !!--Normalise the energy
+      !call normalise_vfield(npart,vxyzu,ierr,ke=epotgrav)
+      !if (ierr /= 0) call fatal('setup','error normalising velocity field')
+      !
+      !!--Setting the centre of mass of the cloud to be zero
+      !call reset_centreofmass(npart,xyzh,vxyzu)
    else
+      !--Setting the centre of mass of the cloud to be zero
+      call reset_centreofmass(npart,xyzh,vxyzu)
+
+      !--Set angular velocity field
       vxyzu(1,i) = -angvel_code*xyzh(2,i)
       vxyzu(2,i) =  angvel_code*xyzh(1,i)
       vxyzu(3,i) = 0.
@@ -270,7 +292,7 @@ subroutine get_input_from_prompts()
    call prompt('Enter the Temperature of the cloud (used for initial sound speed)',Temperature)
    call prompt('Enter the mean molecular mass (used for initial sound speed)',mu)
    if (maxvxyzu < 4) call prompt('Enter the EOS id (1: isothermal, 8: barotropic)',ieos_in)
-   call prompt('Do you wish to have a turbulent velocity field?', turb)
+   !call prompt('Do you wish to have a turbulent velocity field?', turb)
    if (.not. turb) then
       call prompt('Enter angular rotation speed around z-axis in rad/s ',angvel,0.)
    endif
@@ -288,20 +310,25 @@ subroutine get_input_from_prompts()
   
    print "(a)",' writing setup options file '//trim(filename)
    open(unit=iunit,file=filename,status='replace',form='formatted')
+
    write(iunit,"(a)") '# input file for r2-sphere setup routines'
    write(iunit,"(/,a)") '# units'
    call write_inopt(dist_unit,'dist_unit','distance unit (e.g. au)',iunit)
    call write_inopt(mass_unit,'mass_unit','mass unit (e.g. solarm)',iunit)
+
    write(iunit,"(/,a)") '# resolution'
    call write_inopt(np,'n_particles','number of particles in sphere',iunit)
+
    write(iunit,"(/,a)") '# options for sphere'
    call write_inopt(r_sphere,'r_sphere','radius of sphere in code units',iunit)
    call write_inopt(totmass_sphere,'totmass_sphere','mass of sphere in code units',iunit)
    if (.not. turb) call write_inopt(angvel,'angvel','angular velocity in rad/s',iunit)
-   call write_inopt(turb,'use_turb','turbulent velocity field', iunit)
+   !call write_inopt(turb,'use_turb','turbulent velocity field', iunit)
+
    write(iunit,"(/,a)") '# options required for initial sound speed'
    call write_inopt(Temperature,'Temperature','Temperature',iunit)
    call write_inopt(mu,'mu','mean molecular mass',iunit)
+   
    write(iunit,"(/,a)") '# Sink properties (values in .in file, if present, will take precedence)'
    call write_inopt(h_acc_setup,'h_acc','accretion radius (code units)',iunit)
    call write_inopt(r_crit_setup,'r_crit','critical radius (code units)',iunit)
@@ -331,7 +358,7 @@ subroutine get_input_from_prompts()
    call read_inopt(dist_unit,'dist_unit',db,ierr)
    call read_inopt(r_sphere,'r_sphere',db,ierr)
    call read_inopt(totmass_sphere,'totmass_sphere',db,ierr)
-
+   call read_inopt(turb, 'use_turb_vel',db,ierr)
    call read_inopt(Temperature,'Temperature',db,ierr)
    call read_inopt(mu,'mu',db,ierr)
    call close_db(db)
