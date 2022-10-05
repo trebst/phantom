@@ -48,7 +48,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  use physcon,      only:pi,solarm,pc,years,kboltz,mass_proton_cgs,au
  use velfield,     only:set_velfield_from_cubes
  use setup_params, only:rmax,rhozero,npart_total
- use spherical,    only:set_sphere
+ use spherical,    only:set_sphere, rho_func
  use part,         only:igas,set_particle_type
  use io,           only:fatal,master
  use units,        only:umass,udist,utime,set_units
@@ -78,6 +78,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  character(len=120)           :: filex,filey,filez,filein,fileset
  logical                      :: inexists,setexists
  logical                      :: BBB03 = .true. ! use the BB03 defaults, else that of a YMC (S. Jaffa)
+ procedure(rho_func), pointer :: density_func ! pointer to created function
 
  !--Ensure this is pure hydro
  if (mhd) call fatal('setup_cluster','This setup is not consistent with MHD.')
@@ -93,7 +94,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  gamma       = 1.0           ! irrelevant for ieos = 1,8
  Temperature = 10.0          ! Temperature in Kelvin (required for polyK only)
  Rsink_au    = 5.            ! Sink radius [au]
- mu          = 2.46          ! Mean molecular weight (required for polyK only)
+ mu          = 2.381          ! Mean molecular weight (required for polyK only)
  if (BBB03) then
     ! from Bate, Bonnell & Bromm (2003)
     default_cluster = "Bate, Bonnell & Bromm (2003)"
@@ -143,7 +144,8 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  lattice       = 'hcp'
 
  !--Set positions
- call set_sphere(trim(lattice),id,master,0.,rmax,psep,hfact,npart,xyzh,nptot=npart_total, &
+ density_func => r2_func
+ call set_sphere(trim(lattice),id,master,0.,rmax,psep,hfact,npart,xyzh,rhofunc=density_func,nptot=npart_total, &
                  exactN=.true.,np_requested=np,mask=i_belong)
  npartoftype(:) = 0
  npartoftype(1) = npart
@@ -274,4 +276,15 @@ subroutine read_setupfile(filename,ierr)
 
 end subroutine read_setupfile
 !----------------------------------------------------------------
+!
+! Spherical density profile as a function of radius
+!
+!----------------------------------------------------------------
+real function r2_func(r)
+   real, intent(in) :: r
+
+   r2_func = 1./r**2
+
+end function r2_func
+
 end module setup
