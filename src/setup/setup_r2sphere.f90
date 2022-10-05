@@ -15,12 +15,8 @@ module setup
 ! :Owner: Daniel Price
 !
 ! :Runtime parameters:
-!   - ang_Bomega       : *Angle (degrees) between B and rotation axis*
 !   - angvel           : *angular velocity in rad/s*
-!   - cs_sphere_cgs    : *sound speed in sphere in cm/s*
-!   - density_contrast : *density contrast in code units*
 !   - dist_unit        : *distance unit (e.g. au)*
-!   - dusttogas        : *dust-to-gas ratio*
 !   - h_acc            : *accretion radius (code units)*
 !   - h_soft_sinksink  : *sink-sink softening radius (code units)*
 !   - icreate_sinks    : *1: create sinks.  0: do not create sinks*
@@ -31,7 +27,6 @@ module setup
 !   - pmass_dusttogas  : *dust-to-gas particle mass ratio*
 !   - r_crit           : *critical radius (code units)*
 !   - r_sphere         : *radius of sphere in code units*
-!   - rho_pert_amp     : *amplitude of density perturbation*
 !   - totmass_sphere   : *mass of sphere in code units*
 !
 ! :Dependencies: boundary, centreofmass, dim, eos, eos_barotropic,
@@ -47,14 +42,16 @@ module setup
  private
  !--private module variables
  real :: xmini(3), xmaxi(3)
- real :: density_contrast,totmass_sphere,r_sphere,cs_sphere,cs_sphere_cgs
+ real :: density_contrast,totmass_sphere,r_sphere,cs_sphere,cs_sphere_cgs,Temperature,mu
  real :: angvel,masstoflux,dusttogas,pmass_dusttogas,ang_Bomega
  real :: rho_pert_amp,lbox
  real :: r_crit_setup,h_acc_setup,h_soft_sinksink_setup
  real(kind=8)                 :: udist,umass
- integer                      :: np,icreate_sinks_setup
+ integer                      :: np,icreate_sinks_setup,ieos_in,ierr
  logical                      :: mu_not_B,cs_in_code
+ logical                      :: turb = .false.
  character(len=20)            :: dist_unit,mass_unit
+ character(len=10)  :: h_acc_char
  character(len= 1), parameter :: labelx(3) = (/'x','y','z'/)
 
 contains
@@ -65,23 +62,28 @@ contains
 !+
 !----------------------------------------------------------------
 subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,time,fileprefix)
- use physcon,      only:pi,solarm,hours,years,au
- use setup_params, only:rhozero,npart_total,rmax,ihavesetupB
- use io,           only:master,fatal
- use unifdis,      only:set_unifdis
- use spherical,    only:set_sphere, rho_func
- use boundary,     only:set_boundary,xmin,xmax,ymin,ymax,zmin,zmax,dxbound,dybound,dzbound
- use prompting,    only:prompt
- use units,        only:set_units,select_unit,utime,unit_density,unit_velocity
- use eos,          only:polyk2,ieos,gmwsubroutine
- use eos_barotropic, only:rhocrit0cgs
- use part,         only:igas,idust,set_particle_type
- use timestep,     only:dtmax,tmax,dtmax_dratio,dtmax_min
- use centreofmass, only:reset_centreofmass
- use options,      only:nfulldump,rhofinal_cgs
- use kernel,       only:hfact_default
- use mpidomain,    only:i_belong
- use ptmass,       only:icreate_sinks,r_crit,h_acc,h_soft_sinksink
+ use physcon,       only:pi,solarm,hours,years,au,kboltz,mass_proton_cgs
+ use setup_params,  only:rhozero,npart_total,rmax,ihavesetupB
+ use io,            only:master,fatal
+ use unifdis,       only:set_unifdis
+ use spherical,     only:set_sphere, rho_func
+ use boundary,      only:set_boundary,xmin,xmax,ymin,ymax,zmin,zmax,dxbound,dybound,dzbound
+ use prompting,     only:prompt
+ use units,         only:set_units,select_unit,utime,unit_density,unit_velocity
+ use eos,           only:ieos,gmw
+ use eos_barotropic,only:rhocrit0cgs
+ use part,          only:igas,idust,set_particle_type
+ use timestep,      only:dtmax,tmax,dtmax_dratio,dtmax_min
+ use centreofmass,  only:reset_centreofmass
+ use options,       only:nfulldump,rhofinal_cgs
+ use kernel,        only:hfact_default
+ use mpidomain,     only:i_belong
+ use ptmass,        only:icreate_sinks,r_crit,h_acc,h_soft_sinksink
+ ! specifically needed for turbulent setup
+ use datafiles,     only:find_phantom_datafile
+ use setvfield,     only:normalise_vfield
+ use velfield,      only:set_velfield_from_cubes
+
  integer,           intent(in)    :: id
  integer,           intent(inout) :: npart
  integer,           intent(out)   :: npartoftype(:)
@@ -91,124 +93,71 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  real,              intent(out)   :: polyk,gamma,hfact
  real,              intent(inout) :: time
  character(len=20), intent(in)    :: fileprefix
- real(kind=8)       :: h_acc_in
- integer            :: i,nx,np_in,npartsphere,npmax,ierr
- real               :: totmass,vol_box,psep,psep_box
- real               :: vol_sphere,dens_sphere,dens_medium,cs_medium,angvel_code,przero
- real               :: totmass_box,t_ff,r2,area
- real               :: rxy2,rxyz2,phi,dphi,central_density,edge_density
- logical            :: iexist
- logical            :: make_sinks = .true.
- logical            :: turb = .false.
- character(len=100) :: filename
- character(len=40)  :: fmt
- character(len=10)  :: h_acc_char
+ real(kind=8)                 :: h_acc_in
+ integer                      :: i,nx,np_in,npartsphere,npmax
+ real                         :: vol_box,psep,psep_box,epotgrav
+ real                         :: vol_sphere,dens_sphere,dens_medium,cs_medium,angvel_code,przero
+ real                         :: t_ff,r2,area
+ real                         :: rxy2,rxyz2,phi,dphi,central_density,edge_density
+ logical                      :: inexists,setexists
+ logical                      :: make_sinks = .true.
+ character(len=20), parameter :: filevx = 'vel_v1.dat'
+ character(len=20), parameter :: filevy = 'vel_v2.dat'
+ character(len=20), parameter :: filevz = 'vel_v3.dat'
+ character(len=120)           :: filename,filein,fileset,filex,filey,filez
+ character(len=40)            :: fmt
+ character(len=16)            :: lattice
  procedure(rho_func), pointer :: density_func ! pointer to created function
 
- npmax    = size(xyzh(1,:))
- filename = trim(fileprefix)//'.setup'
- print "(/,1x,63('-'),1(/,a),/,1x,63('-'),/)",&
-   '  Sphere-in-box setup: Almost Archimedes'' greatest achievement.'
- inquire(file=filename,exist=iexist)
- if (iexist) then
-    call read_setupfile(filename,ierr)
-    np_in = np
-    if (ierr /= 0) then
-       if (id==master) call write_setupfile(filename)
-       stop
-    endif
- elseif (id==master) then
-    print "(a,/)",trim(filename)//' not found: using interactive setup'
-    dist_unit = '1.0d16cm'
-    mass_unit = 'solarm'
-    ierr = 1
-    do while (ierr /= 0)
-       call prompt('Enter mass unit (e.g. solarm,jupiterm,earthm)',mass_unit)
-       call select_unit(mass_unit,umass,ierr)
-       if (ierr /= 0) print "(a)",' ERROR: mass unit not recognised'
-    enddo
-    ierr = 1
-    do while (ierr /= 0)
-       call prompt('Enter distance unit (e.g. au,pc,kpc,0.1pc)',dist_unit)
-       call select_unit(dist_unit,udist,ierr)
-       if (ierr /= 0) print "(a)",' ERROR: length unit not recognised'
-    enddo
-    !
-    ! units
-    !
-    call set_units(dist=udist,mass=umass,G=1.d0)
-    !
-    ! prompt user for settings
-    !
-   
-    npmax = int(2.0/3.0*size(xyzh(1,:))) ! approx max number allowed in sphere given size(xyzh(1,:))
-    if (npmax < 300000) then
-       np = npmax
-    elseif (npmax < 1000000) then
-       np = 300000
-    else
-       np = 1000000
-    endif
-    
-    call prompt('Enter the approximate number of particles in the sphere',np,0,npmax)
-    np_in    = np
-    r_sphere = 4.
-    call prompt('Enter radius of sphere in units of '//dist_unit,r_sphere,0.)
-    lbox     = 4.
-    call prompt('Enter the box size in units of spherical radii: ',lbox,1.)
-    do i=1,3
-      ! note that these values will be saved to the .setup file rather than lbox so user can convert
-      ! box to a rectangle if desired
-      xmini(i) = -0.5*(lbox*r_sphere)
-      xmaxi(i) = -xmini(i)
-    enddo
+ !--Check for existence of the .in and .setup files
+ filein=trim(fileprefix)//'.in'
+ inquire(file=filein,exist=inexists)
+ fileset=trim(fileprefix)//'.setup'
+ inquire(file=fileset,exist=setexists)
 
-   totmass_sphere = 1.0
-   call prompt('Enter total mass in sphere in units of '//mass_unit,totmass_sphere,0.)
+ npmax          = size(xyzh(1,:))
+ np             = npmax
+ Temperature    = 10.
+ mu             = 2.381
+ ieos_in        = 8
+ r_sphere       = 0.05
+ totmass_sphere = 2.
+ h_acc_char  = '1.0d-3'
 
-   density_contrast = 30.0
-   call prompt('Enter density contrast between sphere and box ',density_contrast,1.)
-
-   cs_sphere_cgs = 21888.0  ! cm/s ~ 8K assuming mu = 2.31 & gamma = 5/3
-   call prompt('Enter sound speed in sphere in units of cm/s',cs_sphere_cgs,0.)
-
-   ! include turbulence option
-   call prompt('Do you wish to set up a turbulent velocity field? ',turb)
-   if (.not. turb) then
-      angvel = 1.35d-13
-      call prompt('Enter angular rotation speed in rad/s ',angvel,0.)
+ !--Read values from .setup
+ if (setexists) then
+   call read_setupfile(fileset,ierr)
+   if (ierr /= 0) then
+      if (id==master) call write_setupfile(fileset)
+      stop
    endif
-    ! ask about sink particle details; these will not be saved to the .setup file since they exist in the .in file
-    !
-    call prompt('Do you wish to dynamically create sink particles? ',make_sinks)
-    if (make_sinks) then
-       h_acc_char  = '1.0d-3'
-       call prompt('Enter the accretion radius of the sink (with units; e.g. au,pc,kpc,0.1pc) ',h_acc_char)
-       call select_unit(h_acc_char,h_acc_in,ierr)
-       h_acc_setup = h_acc_in
-       if (ierr==0 ) h_acc = h_acc/udist
-       r_crit_setup        = 5.0*h_acc_setup
-       icreate_sinks_setup = 1
-    else
-       icreate_sinks_setup = 0
-    endif
-    if (id==master) call write_setupfile(filename)
-    stop 'please edit .setup file and rerun phantomsetup'
- else
-    stop ! MPI, stop on other threads, interactive on master
- endif
+   !--Prompt to get inputs and write to file
+elseif (id==master) then
+   print "(a,/)",trim(fileset)//' not found: using interactive setup'
+   call get_input_from_prompts()
+
+   call select_unit(h_acc_char,h_acc_in,ierr)
+   h_acc_setup = h_acc_in
+   if (ierr==0 ) h_acc = h_acc/udist
+   r_crit_setup        = 5.0*h_acc_setup
+
+   call write_setupfile(fileset)
+endif
  !
  ! units
  !
  call set_units(dist=udist,mass=umass,G=1.d0)
- !
- ! convert units of sound speed
- !
- if (cs_in_code) then
-    cs_sphere_cgs = cs_sphere*unit_velocity
- else
-    cs_sphere     = cs_sphere_cgs/unit_velocity
- endif
+
+ polyk         = kboltz*Temperature/(mu*mass_proton_cgs)*(utime/udist)**2
+ vol_sphere    = 4./3.*pi*r_sphere**3
+ rhozero       = totmass_sphere / vol_sphere
+ dens_sphere   = rhozero
+ hfact         = hfact_default
+ t_ff          = sqrt(3.*pi/(32.*rhozero))  ! free-fall time (the characteristic timescale)
+ epotgrav      = 3./5.*totmass_sphere**2/r_sphere      ! Gravitational potential energy
+ lattice       = 'hcp'
+ angvel_code = angvel*utime
+ vol_box     = dxbound*dybound*dzbound
  !
  ! boundaries
  !
@@ -223,95 +172,76 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  else
     gamma    = 1.
  endif
- rmax        = r_sphere
+ 
  angvel_code = angvel*utime
  vol_box     = dxbound*dybound*dzbound
- vol_sphere  = 4./3.*pi*r_sphere**3
- rhozero     = totmass_sphere / vol_sphere
- dens_sphere = rhozero
- dens_medium = dens_sphere/density_contrast
- cs_medium   = cs_sphere*sqrt(density_contrast)
- totmass_box = (vol_box - vol_sphere)*dens_medium
- totmass     = totmass_box + totmass_sphere
- t_ff        = sqrt(3.*pi/(32.*dens_sphere))
  !
  ! setup particles in the sphere; use this routine to get N_sphere as close to np as possible
  !
  density_func => r2_func
- call set_sphere('closepacked',id,master,0.,r_sphere,psep,hfact,npart,xyzh, &
+ call set_sphere(trim(lattice),id,master,0.,r_sphere,psep,hfact,npart,xyzh, & !formerly lattice: 'closepacked'
                rhofunc=density_func,nptot=npart_total,&
                exactN=.true.,np_requested=np,mask=i_belong)
 
  npartsphere = npart
  if (np_in /= npartsphere) np = npartsphere
  !
- ! setup surrounding low density medium
- !
- psep_box = psep*(density_contrast)**(1./3.)  ! calculate psep in box
- call set_unifdis('closepacked',id,master,xmin,xmax,ymin,ymax,zmin,zmax,psep_box, &
-                   hfact,npart,xyzh,periodic,rmin=r_sphere,nptot=npart_total,mask=i_belong,err=ierr)
- print "(a,es10.3)",' Particle separation in low density medium = ',psep_box
- print "(a,i10,a)",' added ',npart-npartsphere,' particles in low-density medium'
- print*, ""
- !
  ! set particle properties
  !
  npartoftype(:)    = 0
  npartoftype(igas) = npart
- massoftype(igas)  = totmass/npart_total
+ massoftype(igas)  = totmass_sphere/npart_total
  do i = 1,npartoftype(igas)
     call set_particle_type(i,igas)
  enddo
  !
- ! reset to centre of mass
- !
- call reset_centreofmass(npart,xyzh,vxyzu)
- !
- ! temperature set to give a pressure equilibrium
- !
- polyk  = cs_sphere**2
- polyk2 = cs_medium**2
- !
- ! velocity field corresponding to uniform rotation
+ ! velocity field corresponding to uniform rotation or turbulent setup from files
  !
  do i=1,npart
    if (turb) then
-
+      !!--Set velocities (from pre-made velocity cubes)
+      !write(*,"(1x,a)") 'Setting up velocity field on the particles...'
+      !vxyzu(:,:) = 0.
+      !filex = find_phantom_datafile(filevx,'velfield')
+      !filey = find_phantom_datafile(filevy,'velfield')
+      !filez = find_phantom_datafile(filevz,'velfield')
+      !
+      !call set_velfield_from_cubes(xyzh,vxyzu,npartoftype(igas),filex,filey,filez,1.,r_sphere,.false.,ierr)
+      !if (ierr /= 0) call fatal('setup','error setting up velocity field')
+      !
+      !!--Normalise the energy
+      !call normalise_vfield(npart,vxyzu,ierr,ke=epotgrav)
+      !if (ierr /= 0) call fatal('setup','error normalising velocity field')
+      !
+      !!--Setting the centre of mass of the cloud to be zero
+      !call reset_centreofmass(npart,xyzh,vxyzu)
    else
-         r2 = dot_product(xyzh(1:3,i),xyzh(1:3,i))
-      if (r2 < r_sphere**2) then
-         vxyzu(1,i) = -angvel_code*xyzh(2,i)
-         vxyzu(2,i) =  angvel_code*xyzh(1,i)
-         vxyzu(3,i) = 0.
-         if (maxvxyzu >= 4) vxyzu(4,i) = 1.5*polyk
-      else
-         vxyzu(1:3,i) = 0.
-         if (maxvxyzu >= 4) vxyzu(4,i) = 1.5*polyk2
-      endif
+      !--Setting the centre of mass of the cloud to be zero
+      call reset_centreofmass(npart,xyzh,vxyzu)
+
+      !--Set angular velocity field
+      vxyzu(1,i) = -angvel_code*xyzh(2,i)
+      vxyzu(2,i) =  angvel_code*xyzh(1,i)
+      vxyzu(3,i) = 0.
+      if (maxvxyzu >= 4) vxyzu(4,i) = 1.5*polyk
    endif
  enddo
  !
  ! set default runtime parameters if .in file does not exist
  !
  filename=trim(fileprefix)//'.in'
- inquire(file=filename,exist=iexist)
  dtmax = t_ff/100.  ! Since this variable can change, always reset it if running phantomsetup
- if (.not. iexist) then
-    tmax      = 1.21*t_ff ! = 10.75 for default settings
-    ieos         = 8
-    nfulldump    = 1
-    calc_erot    = .true.
-    dtmax_dratio = 1.258
-    icreate_sinks   = icreate_sinks_setup
-    r_crit          = r_crit_setup
+ if (.not. inexists) then
+    tmax            = 2.*t_ff 
+    dtmax           = 0.01*t_ff
+    ieos            = ieos_in
+    !nfulldump       = 1
+    calc_erot       = .true.
+    dtmax_dratio    = 1.258
+    icreate_sinks   = 1
     h_acc           = h_acc_setup
+    r_crit          = r_crit_setup
     h_soft_sinksink = h_soft_sinksink_setup
-    if (icreate_sinks==1) then
-       dtmax_min = dtmax/8.0
-    else
-       dtmax_min = 0.0
-       rhofinal_cgs = 0.15
-    endif
  endif
  !
  !--Summarise the sphere
@@ -321,13 +251,11 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  print "(a)",'  Quantity         (code units)  (physical units)'
  print "(1x,50('-'))"
  fmt = "((a,1pg10.3,3x,1pg10.3),a)"
- print fmt,' Total mass       : ',totmass,totmass*umass,' g'
+ print fmt,' Total mass       : ',totmass_sphere,totmass_sphere*umass,' g'
  print fmt,' Mass in sphere   : ',totmass_sphere,totmass_sphere*umass,' g'
  print fmt,' Radius of sphere : ',r_sphere,r_sphere*udist,' cm'
  print fmt,' Density sphere   : ',dens_sphere,dens_sphere*unit_density,' g/cm^3'
- print fmt,' Density medium   : ',dens_medium,dens_medium*unit_density,' g/cm^3'
  print fmt,' cs in sphere     : ',cs_sphere,cs_sphere_cgs,' cm/s'
- print fmt,' cs in medium     : ',cs_medium,cs_medium*unit_velocity,' cm/s'
  print fmt,' Free fall time   : ',t_ff,t_ff*utime/years,' yrs'
  print fmt,' Angular velocity : ',angvel_code,angvel,' rad/s'
  print fmt,' Omega*t_ff       : ',angvel_code*t_ff
@@ -336,115 +264,123 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
 end subroutine setpart
 
 !----------------------------------------------------------------
-!+
-!  write parameters to setup file
-!+
+!
+!  Prompt user for inputs
+!
 !----------------------------------------------------------------
-subroutine write_setupfile(filename)
- use infile_utils, only: write_inopt
- character(len=*), intent(in) :: filename
- integer, parameter           :: iunit = 20
- integer                      :: i
+subroutine get_input_from_prompts()
+   use prompting, only:prompt
+   use units, only:select_unit
+  
+   call prompt('Enter the number of particles in the sphere',np,0,np)
+   dist_unit = '1.0d16cm'
+   mass_unit = 'solarm'
+   ierr = 1
+   do while (ierr /= 0)
+      call prompt('Enter mass unit (e.g. solarm,jupiterm,earthm)',mass_unit)
+      call select_unit(mass_unit,umass,ierr)
+      if (ierr /= 0) print "(a)",' ERROR: mass unit not recognised'
+   enddo
+   ierr = 1
+   do while (ierr /= 0)
+      call prompt('Enter distance unit (e.g. au,pc,kpc,0.1pc)',dist_unit)
+      call select_unit(dist_unit,udist,ierr)
+      if (ierr /= 0) print "(a)",' ERROR: length unit not recognised'
+   enddo
+   call prompt('Enter the mass of the cloud (in Msun)',totmass_sphere)
+   call prompt('Enter the radius of the cloud (in pc)',r_sphere)
+   call prompt('Enter the Temperature of the cloud (used for initial sound speed)',Temperature)
+   call prompt('Enter the mean molecular mass (used for initial sound speed)',mu)
+   if (maxvxyzu < 4) call prompt('Enter the EOS id (1: isothermal, 8: barotropic)',ieos_in)
+   !call prompt('Do you wish to have a turbulent velocity field?', turb)
+   if (.not. turb) then
+      call prompt('Enter angular rotation speed around z-axis in rad/s ',angvel,0.)
+   endif
+   call prompt('Enter the accretion radius of the sink (with units; e.g. au,pc,kpc,0.1pc) ',h_acc_char)
+  end subroutine get_input_from_prompts
+  !----------------------------------------------------------------
+  !+
+  !  write parameters to setup file
+  !+
+  !----------------------------------------------------------------
+  subroutine write_setupfile(filename)
+   use infile_utils, only: write_inopt
+   character(len=*), intent(in) :: filename
+   integer, parameter           :: iunit = 20
+  
+   print "(a)",' writing setup options file '//trim(filename)
+   open(unit=iunit,file=filename,status='replace',form='formatted')
 
- print "(a)",' writing setup options file '//trim(filename)
- open(unit=iunit,file=filename,status='replace',form='formatted')
- write(iunit,"(a)") '# input file for sphere-in-box setup routines'
- write(iunit,"(/,a)") '# units'
- call write_inopt(dist_unit,'dist_unit','distance unit (e.g. au)',iunit)
- call write_inopt(mass_unit,'mass_unit','mass unit (e.g. solarm)',iunit)
- write(iunit,"(/,a)") '# resolution'
- call write_inopt(np,'np','requested number of particles in sphere',iunit)
- write(iunit,"(/,a)") '# options for box'
- do i=1,3
-    call write_inopt(xmini(i),labelx(i)//'min',labelx(i)//' min',iunit)
-    call write_inopt(xmaxi(i),labelx(i)//'max',labelx(i)//' max',iunit)
- enddo
- write(iunit,"(/,a)") '# intended result'
- write(iunit,"(/,a)") '# options for sphere'
- call write_inopt(r_sphere,'r_sphere','radius of sphere in code units',iunit)
- call write_inopt(totmass_sphere,'totmass_sphere','mass of sphere in code units',iunit)
- call write_inopt(density_contrast,'density_contrast','density contrast in code units',iunit)
- call write_inopt(cs_sphere_cgs,'cs_sphere_cgs','sound speed in sphere in cm/s',iunit)
- call write_inopt(angvel,'angvel','angular velocity in rad/s',iunit)
- write(iunit,"(/,a)") '# Sink properties (values in .in file, if present, will take precedence)'
- call write_inopt(icreate_sinks_setup,'icreate_sinks','1: create sinks.  0: do not create sinks',iunit)
- if (icreate_sinks_setup==1) then
-    call write_inopt(h_acc_setup,'h_acc','accretion radius (code units)',iunit)
-    call write_inopt(r_crit_setup,'r_crit','critical radius (code units)',iunit)
- endif
- close(iunit)
+   write(iunit,"(a)") '# input file for r2-sphere setup routines'
+   write(iunit,"(/,a)") '# units'
+   call write_inopt(dist_unit,'dist_unit','distance unit (e.g. au)',iunit)
+   call write_inopt(mass_unit,'mass_unit','mass unit (e.g. solarm)',iunit)
 
-end subroutine write_setupfile
+   write(iunit,"(/,a)") '# resolution'
+   call write_inopt(np,'n_particles','number of particles in sphere',iunit)
 
-!----------------------------------------------------------------
-!+
-!  Read parameters from setup file
-!+
-!----------------------------------------------------------------
-subroutine read_setupfile(filename,ierr)
- use infile_utils, only: open_db_from_file,inopts,read_inopt,close_db
- use io,           only: error
- use units,        only: select_unit
- character(len=*), intent(in)  :: filename
- integer,          intent(out) :: ierr
- integer, parameter            :: iunit = 21
- integer                       :: i,nerr,jerr,kerr
- type(inopts), allocatable     :: db(:)
+   write(iunit,"(/,a)") '# options for sphere'
+   call write_inopt(r_sphere,'r_sphere','radius of sphere in code units',iunit)
+   call write_inopt(totmass_sphere,'totmass_sphere','mass of sphere in code units',iunit)
+   if (.not. turb) call write_inopt(angvel,'angvel','angular velocity in rad/s',iunit)
+   !call write_inopt(turb,'use_turb','turbulent velocity field', iunit)
 
- !--Read values
- print "(a)",' reading setup options from '//trim(filename)
- call open_db_from_file(db,filename,iunit,ierr)
- call read_inopt(mass_unit,'mass_unit',db,ierr)
- call read_inopt(dist_unit,'dist_unit',db,ierr)
- call read_inopt(np,'np',db,ierr)
- 
- do i=1,3
-    call read_inopt(xmini(i),labelx(i)//'min',db,ierr)
-    call read_inopt(xmaxi(i),labelx(i)//'max',db,ierr)
- enddo
- call read_inopt(r_sphere,'r_sphere',db,ierr)
- call read_inopt(totmass_sphere,'totmass_sphere',db,ierr)
- lbox = -2.0*xmini(1)/r_sphere
+   write(iunit,"(/,a)") '# options required for initial sound speed'
+   call write_inopt(Temperature,'Temperature','Temperature',iunit)
+   call write_inopt(mu,'mu','mean molecular mass',iunit)
+   
+   write(iunit,"(/,a)") '# Sink properties (values in .in file, if present, will take precedence)'
+   call write_inopt(h_acc_setup,'h_acc','accretion radius (code units)',iunit)
+   call write_inopt(r_crit_setup,'r_crit','critical radius (code units)',iunit)
+   close(iunit)
+  
+  end subroutine write_setupfile
+  
+  !----------------------------------------------------------------
+  !+
+  !  Read parameters from setup file
+  !+
+  !----------------------------------------------------------------
+  subroutine read_setupfile(filename,ierr)
+   use infile_utils, only: open_db_from_file,inopts,read_inopt,close_db
+   use io,           only: error
+   use units,        only: select_unit
+   character(len=*), intent(in)  :: filename
+   integer,          intent(out) :: ierr
+   integer, parameter            :: iunit = 21
+   integer                       :: nerr
+   type(inopts), allocatable     :: db(:)
+  
+   print "(a)",' reading setup options from '//trim(filename)
+   call open_db_from_file(db,filename,iunit,ierr)
+   call read_inopt(np,'n_particles',db,ierr)
+   call read_inopt(mass_unit,'mass_unit',db,ierr)
+   call read_inopt(dist_unit,'dist_unit',db,ierr)
+   call read_inopt(r_sphere,'r_sphere',db,ierr)
+   call read_inopt(totmass_sphere,'totmass_sphere',db,ierr)
+   call read_inopt(turb, 'use_turb_vel',db,ierr)
+   call read_inopt(Temperature,'Temperature',db,ierr)
+   call read_inopt(mu,'mu',db,ierr)
+   call close_db(db)
+  !
+  ! parse units
+  !
+   call select_unit(mass_unit,umass,nerr)
+   if (nerr /= 0) then
+      call error('setup_sphereinbox','mass unit not recognised')
+      ierr = ierr + 1
+   endif
+   call select_unit(dist_unit,udist,nerr)
+   if (nerr /= 0) then
+      call error('setup_sphereinbox','length unit not recognised')
+      ierr = ierr + 1
+   endif 
 
- call read_inopt(density_contrast,'density_contrast',db,ierr)
- call read_inopt(cs_sphere,'cs_sphere',db,jerr)
- call read_inopt(cs_sphere_cgs,'cs_sphere_cgs',db,kerr)
- cs_in_code = .false.  ! for backwards compatibility
- if (jerr /= 0 .and. kerr == 0) then
-    cs_in_code = .false.
- elseif (jerr == 0 .and. kerr /= 0) then
-    cs_in_code = .true.
- else
-    ierr = ierr + 1
- endif
- call read_inopt(angvel,'angvel',db,ierr)
- mu_not_B = .true.
- call read_inopt(icreate_sinks_setup,'icreate_sinks',db,ierr)
- if (icreate_sinks_setup==1) then
-    call read_inopt(h_acc_setup,'h_acc',db,ierr)
-    call read_inopt(r_crit_setup,'r_crit',db,ierr)
- endif
- call close_db(db)
- !
- ! parse units
- !
- call select_unit(mass_unit,umass,nerr)
- if (nerr /= 0) then
-    call error('setup_sphereinbox','mass unit not recognised')
-    ierr = ierr + 1
- endif
- call select_unit(dist_unit,udist,nerr)
- if (nerr /= 0) then
-    call error('setup_sphereinbox','length unit not recognised')
-    ierr = ierr + 1
- endif
-
- if (ierr > 0) then
-    print "(1x,a,i2,a)",'Setup_sphereinbox: ',nerr,' error(s) during read of setup file.  Re-writing.'
- endif
-
-end subroutine read_setupfile
-
+   if (ierr > 0) then
+      print "(1x,a,i2,a)",'Setup_r2sphere: ',nerr,' error(s) during read of setup file.  Re-writing.'
+   endif
+  
+  end subroutine read_setupfile
 !----------------------------------------------------------------
 !
 ! Spherical density profile as a function of radius
