@@ -141,7 +141,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  hfact         = hfact_default
  t_ff          = sqrt(3.*pi/(32.*rhozero))  ! free-fall time (the characteristic timescale)
  epotgrav      = 3./5.*totmass**2/rmax      ! Gravitational potential energy
- lattice       = 'hcp'
+ lattice       = 'closepacked'
 
  !--Set positions
  density_func => r2_func

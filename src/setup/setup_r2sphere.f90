@@ -63,16 +63,18 @@ contains
 !----------------------------------------------------------------
 subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,time,fileprefix)
  use physcon,       only:pi,solarm,hours,years,au,kboltz,mass_proton_cgs
+ use velfield,     only:set_velfield_from_cubes
  use setup_params,  only:rhozero,npart_total,rmax,ihavesetupB
- use io,            only:master,fatal
- use unifdis,       only:set_unifdis
  use spherical,     only:set_sphere, rho_func
+ use part,          only:igas,idust,set_particle_type
+ use io,            only:master,fatal
+ !use unifdis,       only:set_unifdis
+ use setvfield,     only:normalise_vfield
+ use units,         only:set_units,select_unit,utime,unit_density,unit_velocity
  use boundary,      only:set_boundary,xmin,xmax,ymin,ymax,zmin,zmax,dxbound,dybound,dzbound
  use prompting,     only:prompt
- use units,         only:set_units,select_unit,utime,unit_density,unit_velocity
  use eos,           only:ieos,gmw
  use eos_barotropic,only:rhocrit0cgs
- use part,          only:igas,idust,set_particle_type
  use timestep,      only:dtmax,tmax,dtmax_dratio,dtmax_min
  use centreofmass,  only:reset_centreofmass
  use options,       only:nfulldump,rhofinal_cgs
@@ -80,9 +82,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  use mpidomain,     only:i_belong
  use ptmass,        only:icreate_sinks,r_crit,h_acc,h_soft_sinksink
  ! specifically needed for turbulent setup
- use datafiles,     only:find_phantom_datafile
- use setvfield,     only:normalise_vfield
- use velfield,      only:set_velfield_from_cubes
+ use datafiles,     only:find_phantom_datafile 
 
  integer,           intent(in)    :: id
  integer,           intent(inout) :: npart
@@ -155,7 +155,7 @@ endif
  hfact         = hfact_default
  t_ff          = sqrt(3.*pi/(32.*rhozero))  ! free-fall time (the characteristic timescale)
  epotgrav      = 3./5.*totmass_sphere**2/r_sphere      ! Gravitational potential energy
- lattice       = 'hcp'
+ lattice       = 'closepacked'
  angvel_code = angvel*utime
  vol_box     = dxbound*dybound*dzbound
  !
@@ -197,6 +197,10 @@ endif
  !
  ! velocity field corresponding to uniform rotation or turbulent setup from files
  !
+
+ !--Setting the centre of mass of the cloud to be zero
+ call reset_centreofmass(npart,xyzh,vxyzu)
+
  do i=1,npart
    if (turb) then
       !!--Set velocities (from pre-made velocity cubes)
@@ -216,9 +220,6 @@ endif
       !!--Setting the centre of mass of the cloud to be zero
       !call reset_centreofmass(npart,xyzh,vxyzu)
    else
-      !--Setting the centre of mass of the cloud to be zero
-      call reset_centreofmass(npart,xyzh,vxyzu)
-
       !--Set angular velocity field
       vxyzu(1,i) = -angvel_code*xyzh(2,i)
       vxyzu(2,i) =  angvel_code*xyzh(1,i)
