@@ -1001,16 +1001,16 @@ ifeq ($(SETUP), radiativebox)
 endif
 
 ifeq ($(SETUP), r2sphere)
-#   barotropic r^-2 sphere 
+#   r^-2 sphere 
     ANALYSIS=analysis_sinkmass.f90
-    SETUPFILE=setup_r2sphere.f90
-    #SRCTURB= forcing.F90
-    #ANALYSIS=analysis_sphere.f90
+    SETUPFILE=velfield_fromcubes.f90 setup_r2sphere.f90
     ISOTHERMAL=yes
     GRAVITY=yes
     KNOWN_SETUP=yes
 endif
 
+
+# OLD! NOT IN USE ANYMORE! Included into r2sphere now
 ifeq ($(SETUP), isor2sphere)
 #   isothermal r^-2 sphere 
     ANALYSIS=analysis_sinkmass.f90
