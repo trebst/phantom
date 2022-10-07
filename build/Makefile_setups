@@ -1010,7 +1010,7 @@ ifeq ($(SETUP), r2sphere)
 endif
 
 
-# OLD! NOT IN USE ANYMORE! Included into r2sphere now
+# OLD! NOT IN USE ANYMORE! Included in r2sphere now
 ifeq ($(SETUP), isor2sphere)
 #   isothermal r^-2 sphere 
     ANALYSIS=analysis_sinkmass.f90
