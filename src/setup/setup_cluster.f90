@@ -71,9 +71,9 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  character(len=20), intent(in)    :: fileprefix
  integer                      :: i,ierr
  real                         :: r2,totmass,epotgrav,t_ff,psep
- character(len=20), parameter :: filevx = 'vel_v1.dat'
- character(len=20), parameter :: filevy = 'vel_v2.dat'
- character(len=20), parameter :: filevz = 'vel_v3.dat'
+ character(len=20), parameter :: filevx = 'cube_v1.dat'
+ character(len=20), parameter :: filevy = 'cube_v2.dat'
+ character(len=20), parameter :: filevz = 'cube_v3.dat'
  character(len=16)            :: lattice
  character(len=120)           :: filex,filey,filez,filein,fileset
  logical                      :: inexists,setexists
@@ -94,7 +94,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  gamma       = 1.0           ! irrelevant for ieos = 1,8
  Temperature = 10.0          ! Temperature in Kelvin (required for polyK only)
  Rsink_au    = 5.            ! Sink radius [au]
- mu          = 2.381          ! Mean molecular weight (required for polyK only)
+ mu          = 2.46          ! Mean molecular weight (required for polyK only)
  if (BBB03) then
     ! from Bate, Bonnell & Bromm (2003)
     default_cluster = "Bate, Bonnell & Bromm (2003)"
@@ -275,6 +275,7 @@ subroutine read_setupfile(filename,ierr)
  endif
 
 end subroutine read_setupfile
+
 !----------------------------------------------------------------
 !
 ! Spherical density profile as a function of radius
@@ -287,4 +288,5 @@ real function r2_func(r)
 
 end function r2_func
 
+!----------------------------------------------------------------
 end module setup
