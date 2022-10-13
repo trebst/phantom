@@ -90,7 +90,7 @@ subroutine set_velfield_from_cubes(xyzh,vxyzu,npart,filevx,filevy,filevz,&
  integer,          intent(out) :: ierr
  integer, parameter :: iunit = 43
 
- integer :: i,nspace!,nbytes_per_vel,nbytes_fheader
+ integer :: i,nspace,nbytes_per_vel,nbytes_fheader
  integer :: ifilesizex,ifilesizey,ifilesizez
  integer :: ierrx,ierry,ierrz,iposx,iposy,iposz
  logical :: iexistx,iexisty,iexistz
@@ -115,23 +115,21 @@ subroutine set_velfield_from_cubes(xyzh,vxyzu,npart,filevx,filevy,filevz,&
     ierr = 1
     return
  endif
- !if (.not.((ifilesizey==ifilesizex) .and. (ifilesizez==ifilesizex))) then
- !   write(*,*) 'ERROR: velocity files have different sizes (should all be the same): aborting...'
- !   write(*,*) 'File sizes in Bytes = ',ifilesizex,ifilesizey,ifilesizez
- !   ierr = 1
- !   return
- !endif
+ if (.not.((ifilesizey==ifilesizex) .and. (ifilesizez==ifilesizex))) then
+    write(*,*) 'ERROR: velocity files have different sizes (should all be the same): aborting...'
+    write(*,*) 'File sizes in Bytes = ',ifilesizex,ifilesizey,ifilesizez
+    ierr = 1
+    return
+ endif
 !
 !--work out the size of the velocity files from the filesize
 !  and allocate memory for the velocity grid arrays
 !
- !nbytes_per_vel = kind(velx)
- !nbytes_fheader = 8   ! Fortran inserts 4 bytes before and after a write statement
- !nspace = nint(((ifilesizex - nbytes_fheader)/nbytes_per_vel)**(1./3.))
- !write(*,"(1x,a,i4,a)") 'Size of velocity grid (from filesize) = ',nspace,'^3'
- nspace = 128
- write (*,*) 'assuming size of velocity files n=128^3'
- write (*,*) 'else edit /src/setup/velfield_formcubes.f90'
+ nbytes_per_vel = kind(velx)
+ nbytes_fheader = 8   ! Fortran inserts 4 bytes before and after a write statement
+ nspace = nint(((ifilesizex - nbytes_fheader)/nbytes_per_vel)**(1./3.))
+ write(*,"(1x,a,i4,a)") 'Size of velocity grid (from filesize) = ',nspace,'^3'
+ !write (*,*) 'enter size of velocity files (e.g.n=32^3)'
 
  allocate(velx(nspace,nspace,nspace),stat=ierrx)
  allocate(vely(nspace,nspace,nspace),stat=ierry)
