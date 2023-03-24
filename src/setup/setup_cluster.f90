@@ -92,9 +92,9 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  !--Set default values
  np          = size(xyzh(1,:))
  gamma       = 1.0           ! irrelevant for ieos = 1,8
- Temperature = 10.0          ! Temperature in Kelvin (required for polyK only)
+ Temperature = 100.0          ! Temperature in Kelvin (required for polyK only)
  Rsink_au    = 5.            ! Sink radius [au]
- mu          = 2.46          ! Mean molecular weight (required for polyK only)
+ mu          = 1.5          ! Mean molecular weight (required for polyK only)
  if (BBB03) then
     ! from Bate, Bonnell & Bromm (2003)
     default_cluster = "Bate, Bonnell & Bromm (2003)"
