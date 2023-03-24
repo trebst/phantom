@@ -117,11 +117,11 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
 
  npmax          = size(xyzh(1,:))
  np             = npmax
- Temperature    = 10.
- mu             = 2.381
+ Temperature    = 23.
+ mu             = 2.99
  ieos_in        = 8
- r_sphere       = 0.05
- totmass_sphere = 2.
+ r_sphere       = 5.0
+ totmass_sphere = 2.0d3
  h_acc_char  = '1.0d-3'
 
  !--Read values from .setup
